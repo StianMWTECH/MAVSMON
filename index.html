@@ -1,0 +1,1108 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>MAVSMON — System Status Monitor</title>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;600;700&family=Space+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg-deep: #0a0e14;
+    --bg-panel: #111820;
+    --bg-card: #151d28;
+    --bg-card-hover: #1a2433;
+    --border: #1e2a3a;
+    --border-active: #2a3f5a;
+    --text-primary: #c8d6e5;
+    --text-secondary: #6b7f96;
+    --text-muted: #3d5068;
+    --accent-green: #00e676;
+    --accent-green-dim: #00e67622;
+    --accent-amber: #ffab00;
+    --accent-amber-dim: #ffab0022;
+    --accent-red: #ff5252;
+    --accent-red-dim: #ff525222;
+    --accent-blue: #448aff;
+    --accent-blue-dim: #448aff22;
+    --accent-cyan: #18ffff;
+    --accent-cyan-dim: #18ffff15;
+    --glow-green: 0 0 20px #00e67633;
+    --glow-amber: 0 0 20px #ffab0033;
+    --glow-red: 0 0 20px #ff525233;
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    background: var(--bg-deep);
+    color: var(--text-primary);
+    font-family: 'JetBrains Mono', monospace;
+    min-height: 100vh;
+    overflow-x: hidden;
+  }
+
+  /* Scan-line overlay */
+  body::after {
+    content: '';
+    position: fixed;
+    inset: 0;
+    background: repeating-linear-gradient(
+      0deg,
+      transparent,
+      transparent 2px,
+      rgba(0,0,0,0.03) 2px,
+      rgba(0,0,0,0.03) 4px
+    );
+    pointer-events: none;
+    z-index: 9999;
+  }
+
+  .app-header {
+    background: var(--bg-panel);
+    border-bottom: 1px solid var(--border);
+    padding: 16px 32px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    position: sticky;
+    top: 0;
+    z-index: 100;
+    backdrop-filter: blur(12px);
+  }
+
+  .app-header .logo-area {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+  }
+
+  .app-header .logo-area .dot-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 6px);
+    gap: 3px;
+  }
+
+  .app-header .logo-area .dot-grid span {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: var(--accent-cyan);
+    opacity: 0.6;
+    animation: dotPulse 3s ease-in-out infinite;
+  }
+  .app-header .logo-area .dot-grid span:nth-child(2) { animation-delay: 0.15s; }
+  .app-header .logo-area .dot-grid span:nth-child(3) { animation-delay: 0.3s; }
+  .app-header .logo-area .dot-grid span:nth-child(4) { animation-delay: 0.45s; }
+  .app-header .logo-area .dot-grid span:nth-child(5) { animation-delay: 0.6s; opacity: 1; background: var(--accent-green); }
+  .app-header .logo-area .dot-grid span:nth-child(6) { animation-delay: 0.75s; }
+  .app-header .logo-area .dot-grid span:nth-child(7) { animation-delay: 0.9s; }
+  .app-header .logo-area .dot-grid span:nth-child(8) { animation-delay: 1.05s; }
+  .app-header .logo-area .dot-grid span:nth-child(9) { animation-delay: 1.2s; }
+
+  @keyframes dotPulse {
+    0%, 100% { opacity: 0.3; }
+    50% { opacity: 0.8; }
+  }
+
+  .app-title {
+    font-size: 18px;
+    font-weight: 700;
+    letter-spacing: 4px;
+    text-transform: uppercase;
+    color: var(--accent-cyan);
+    text-shadow: 0 0 30px rgba(24, 255, 255, 0.2);
+  }
+
+  .app-subtitle {
+    font-size: 11px;
+    color: var(--text-secondary);
+    letter-spacing: 2px;
+    margin-top: 2px;
+  }
+
+  .header-right {
+    display: flex;
+    align-items: center;
+    gap: 24px;
+  }
+
+  .header-meta {
+    text-align: right;
+    font-size: 11px;
+    color: var(--text-secondary);
+    line-height: 1.6;
+  }
+
+  .header-meta .uptime {
+    color: var(--accent-green);
+    font-weight: 600;
+  }
+
+  .refresh-btn {
+    background: var(--accent-cyan-dim);
+    border: 1px solid rgba(24, 255, 255, 0.2);
+    color: var(--accent-cyan);
+    padding: 8px 18px;
+    font-family: inherit;
+    font-size: 11px;
+    letter-spacing: 2px;
+    text-transform: uppercase;
+    cursor: pointer;
+    border-radius: 4px;
+    transition: all 0.2s;
+    font-weight: 600;
+  }
+
+  .refresh-btn:hover {
+    background: rgba(24, 255, 255, 0.15);
+    box-shadow: 0 0 20px rgba(24, 255, 255, 0.15);
+  }
+
+  .refresh-btn.refreshing {
+    animation: spin 1s linear infinite;
+  }
+
+  @keyframes spin {
+    from { transform: rotate(0deg); }
+    to { transform: rotate(360deg); }
+  }
+
+  /* Sidebar + Content Layout */
+  .app-layout {
+    display: flex;
+    min-height: calc(100vh - 60px);
+  }
+
+  .sidebar {
+    width: 240px;
+    background: var(--bg-panel);
+    border-right: 1px solid var(--border);
+    padding: 20px 0;
+    flex-shrink: 0;
+    position: sticky;
+    top: 60px;
+    height: calc(100vh - 60px);
+    overflow-y: auto;
+  }
+
+  .sidebar-label {
+    font-size: 9px;
+    letter-spacing: 3px;
+    text-transform: uppercase;
+    color: var(--text-muted);
+    padding: 12px 20px 8px;
+  }
+
+  .nav-item {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 10px 20px;
+    cursor: pointer;
+    transition: all 0.15s;
+    border-left: 3px solid transparent;
+    font-size: 12px;
+    color: var(--text-secondary);
+    letter-spacing: 0.5px;
+    user-select: none;
+  }
+
+  .nav-item:hover {
+    background: var(--bg-card);
+    color: var(--text-primary);
+  }
+
+  .nav-item.active {
+    background: var(--accent-cyan-dim);
+    color: var(--accent-cyan);
+    border-left-color: var(--accent-cyan);
+  }
+
+  .nav-item .status-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    flex-shrink: 0;
+  }
+
+  .nav-item .status-dot.up { background: var(--accent-green); box-shadow: var(--glow-green); }
+  .nav-item .status-dot.warn { background: var(--accent-amber); box-shadow: var(--glow-amber); }
+  .nav-item .status-dot.down { background: var(--accent-red); box-shadow: var(--glow-red); }
+
+  .main-content {
+    flex: 1;
+    padding: 24px 32px;
+    overflow-y: auto;
+  }
+
+  /* Overview panel */
+  .overview-bar {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    gap: 16px;
+    margin-bottom: 28px;
+    animation: fadeInUp 0.5s ease-out;
+  }
+
+  @keyframes fadeInUp {
+    from { opacity: 0; transform: translateY(12px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+
+  .stat-card {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 16px 20px;
+    transition: all 0.2s;
+  }
+
+  .stat-card:hover {
+    border-color: var(--border-active);
+    background: var(--bg-card-hover);
+  }
+
+  .stat-label {
+    font-size: 9px;
+    letter-spacing: 2px;
+    text-transform: uppercase;
+    color: var(--text-muted);
+    margin-bottom: 8px;
+  }
+
+  .stat-value {
+    font-size: 28px;
+    font-weight: 700;
+    color: var(--accent-green);
+  }
+
+  .stat-value.amber { color: var(--accent-amber); }
+  .stat-value.blue { color: var(--accent-blue); }
+
+  .stat-detail {
+    font-size: 10px;
+    color: var(--text-secondary);
+    margin-top: 4px;
+  }
+
+  /* Section panels */
+  .section-panel {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    margin-bottom: 20px;
+    overflow: hidden;
+    animation: fadeInUp 0.5s ease-out;
+  }
+
+  .section-panel:nth-child(2) { animation-delay: 0.05s; }
+  .section-panel:nth-child(3) { animation-delay: 0.1s; }
+  .section-panel:nth-child(4) { animation-delay: 0.15s; }
+
+  .section-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 14px 20px;
+    border-bottom: 1px solid var(--border);
+    cursor: pointer;
+    transition: background 0.15s;
+    user-select: none;
+  }
+
+  .section-header:hover {
+    background: var(--bg-card-hover);
+  }
+
+  .section-header-left {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+
+  .section-icon {
+    width: 32px;
+    height: 32px;
+    border-radius: 6px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 14px;
+    font-weight: 700;
+    flex-shrink: 0;
+  }
+
+  .section-icon.green { background: var(--accent-green-dim); color: var(--accent-green); }
+  .section-icon.amber { background: var(--accent-amber-dim); color: var(--accent-amber); }
+  .section-icon.blue  { background: var(--accent-blue-dim);  color: var(--accent-blue); }
+
+  .section-title {
+    font-size: 13px;
+    font-weight: 600;
+    letter-spacing: 1px;
+    text-transform: uppercase;
+  }
+
+  .section-count {
+    font-size: 10px;
+    color: var(--text-secondary);
+    margin-top: 2px;
+  }
+
+  .section-status-badge {
+    font-size: 10px;
+    font-weight: 600;
+    letter-spacing: 1.5px;
+    text-transform: uppercase;
+    padding: 4px 12px;
+    border-radius: 20px;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+
+  .section-status-badge.up {
+    background: var(--accent-green-dim);
+    color: var(--accent-green);
+    border: 1px solid rgba(0, 230, 118, 0.2);
+  }
+
+  .section-status-badge.down {
+    background: var(--accent-red-dim);
+    color: var(--accent-red);
+    border: 1px solid rgba(255, 82, 82, 0.2);
+  }
+
+  .chevron {
+    color: var(--text-muted);
+    transition: transform 0.25s;
+    font-size: 12px;
+  }
+
+  .section-panel.collapsed .chevron {
+    transform: rotate(-90deg);
+  }
+
+  .section-body {
+    max-height: 600px;
+    overflow: hidden;
+    transition: max-height 0.35s ease;
+  }
+
+  .section-panel.collapsed .section-body {
+    max-height: 0;
+  }
+
+  /* Process rows */
+  .process-table {
+    width: 100%;
+    font-size: 12px;
+  }
+
+  .process-table .proc-row {
+    display: grid;
+    grid-template-columns: 40px 1fr 90px;
+    align-items: center;
+    padding: 10px 20px;
+    border-bottom: 1px solid rgba(30, 42, 58, 0.5);
+    transition: background 0.1s;
+  }
+
+  .process-table .proc-row:last-child {
+    border-bottom: none;
+  }
+
+  .process-table .proc-row:hover {
+    background: rgba(24, 255, 255, 0.02);
+  }
+
+  .proc-index {
+    color: var(--text-muted);
+    font-size: 10px;
+  }
+
+  .proc-cmd {
+    color: var(--text-primary);
+    font-size: 11.5px;
+    word-break: break-all;
+    line-height: 1.5;
+  }
+
+  .proc-cmd .proc-highlight {
+    color: var(--accent-cyan);
+    font-weight: 500;
+  }
+
+  .proc-status {
+    text-align: right;
+    font-size: 10px;
+    font-weight: 600;
+    letter-spacing: 1px;
+    text-transform: uppercase;
+    color: var(--accent-green);
+  }
+
+  /* Shared memory table */
+  .shm-table {
+    width: 100%;
+    font-size: 11.5px;
+  }
+
+  .shm-table .shm-header {
+    display: grid;
+    grid-template-columns: 120px 50px 60px 60px 110px 50px;
+    padding: 8px 20px;
+    background: rgba(0,0,0,0.2);
+    border-bottom: 1px solid var(--border);
+    font-size: 9px;
+    letter-spacing: 2px;
+    text-transform: uppercase;
+    color: var(--text-muted);
+    font-weight: 600;
+  }
+
+  .shm-table .shm-row {
+    display: grid;
+    grid-template-columns: 120px 50px 60px 60px 110px 50px;
+    padding: 8px 20px;
+    border-bottom: 1px solid rgba(30, 42, 58, 0.4);
+    color: var(--text-primary);
+    transition: background 0.1s;
+  }
+
+  .shm-table .shm-row:hover {
+    background: rgba(24, 255, 255, 0.02);
+  }
+
+  .shm-key { color: var(--accent-cyan); font-weight: 500; }
+
+  /* Load average bar */
+  .load-bar {
+    padding: 20px;
+    display: flex;
+    align-items: center;
+    gap: 24px;
+  }
+
+  .load-gauge {
+    width: 72px;
+    height: 72px;
+    border-radius: 50%;
+    border: 3px solid var(--border);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    position: relative;
+  }
+
+  .load-gauge .load-val {
+    font-size: 20px;
+    font-weight: 700;
+    color: var(--accent-green);
+  }
+
+  .load-gauge::after {
+    content: '';
+    position: absolute;
+    inset: -3px;
+    border-radius: 50%;
+    border: 3px solid transparent;
+    border-top-color: var(--accent-green);
+    border-right-color: var(--accent-green);
+    transform: rotate(30deg);
+  }
+
+  .load-details {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+
+  .load-row {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    font-size: 12px;
+  }
+
+  .load-label {
+    color: var(--text-muted);
+    font-size: 10px;
+    letter-spacing: 1px;
+    width: 40px;
+  }
+
+  .load-track {
+    width: 180px;
+    height: 6px;
+    background: var(--bg-deep);
+    border-radius: 3px;
+    overflow: hidden;
+  }
+
+  .load-fill {
+    height: 100%;
+    border-radius: 3px;
+    background: var(--accent-green);
+    transition: width 0.6s ease;
+  }
+
+  .load-num {
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--text-primary);
+    width: 40px;
+    text-align: right;
+  }
+
+  /* All-section view */
+  .section-view { display: none; }
+  .section-view.active { display: block; }
+
+  /* Responsive */
+  @media (max-width: 800px) {
+    .sidebar { display: none; }
+    .app-header { padding: 12px 16px; }
+    .main-content { padding: 16px; }
+    .shm-table .shm-header, .shm-table .shm-row {
+      grid-template-columns: 100px 40px 50px 50px 90px 40px;
+      font-size: 10px;
+    }
+  }
+</style>
+</head>
+<body>
+
+<header class="app-header">
+  <div class="logo-area">
+    <div class="dot-grid">
+      <span></span><span></span><span></span>
+      <span></span><span></span><span></span>
+      <span></span><span></span><span></span>
+    </div>
+    <div>
+      <div class="app-title">MAVSMON</div>
+      <div class="app-subtitle">Production System Monitor</div>
+    </div>
+  </div>
+  <div class="header-right">
+    <div class="header-meta">
+      <div>HOST: <span style="color:var(--accent-cyan)">PROD</span> &nbsp;|&nbsp; USERS: <span style="color:var(--text-primary)">10</span></div>
+      <div>UPTIME: <span class="uptime">18d 16h 50m</span></div>
+    </div>
+    <button class="refresh-btn" onclick="refreshAll()">⟳ REFRESH</button>
+  </div>
+</header>
+
+<div class="app-layout">
+  <nav class="sidebar">
+    <div class="sidebar-label">Navigation</div>
+    <div class="nav-item active" onclick="showSection('all', this)">
+      <span class="status-dot up"></span> All Systems
+    </div>
+    <div class="sidebar-label" style="margin-top:8px">Services</div>
+    <div class="nav-item" onclick="showSection('load', this)">
+      <span class="status-dot up"></span> Load Average
+    </div>
+    <div class="nav-item" onclick="showSection('brokers', this)">
+      <span class="status-dot up"></span> Brokers (ETB)
+    </div>
+    <div class="nav-item" onclick="showSection('natbp', this)">
+      <span class="status-dot up"></span> NATBP (SHM)
+    </div>
+    <div class="nav-item" onclick="showSection('ndvs', this)">
+      <span class="status-dot up"></span> NDV Servers
+    </div>
+    <div class="nav-item" onclick="showSection('dbs', this)">
+      <span class="status-dot up"></span> Databases (Adabas)
+    </div>
+    <div class="nav-item" onclick="showSection('cics', this)">
+      <span class="status-dot up"></span> CICS Services
+    </div>
+    <div class="nav-item" onclick="showSection('cronus', this)">
+      <span class="status-dot up"></span> CRONUS
+    </div>
+    <div class="nav-item" onclick="showSection('s4', this)">
+      <span class="status-dot up"></span> Secure4 (S4)
+    </div>
+    <div class="nav-item" onclick="showSection('tcvision', this)">
+      <span class="status-dot up"></span> tcVision / RDRS
+    </div>
+  </nav>
+
+  <main class="main-content">
+    <!-- ALL SYSTEMS VIEW -->
+    <div id="view-all" class="section-view active">
+      <!-- Overview Cards -->
+      <div class="overview-bar">
+        <div class="stat-card">
+          <div class="stat-label">Load Average (1m)</div>
+          <div class="stat-value">0.41</div>
+          <div class="stat-detail">5m: 0.38 &nbsp; 15m: 0.26</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label">Active Brokers</div>
+          <div class="stat-value blue">5</div>
+          <div class="stat-detail">ETB001, ETB109, ETB225, ETB227</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label">Databases Online</div>
+          <div class="stat-value">9</div>
+          <div class="stat-detail">DBID 38, 41, 45, 65, 66, 69, 75, 101, 200</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label">Services Status</div>
+          <div class="stat-value">ALL UP</div>
+          <div class="stat-detail">8 of 8 subsystems operational</div>
+        </div>
+      </div>
+
+      <!-- Load Average -->
+      <div class="section-panel" id="panel-load">
+        <div class="section-header" onclick="togglePanel('panel-load')">
+          <div class="section-header-left">
+            <div class="section-icon green">▲</div>
+            <div>
+              <div class="section-title">Load Average</div>
+              <div class="section-count">System resource utilization</div>
+            </div>
+          </div>
+          <div style="display:flex;align-items:center;gap:12px">
+            <div class="section-status-badge up">● NORMAL</div>
+            <div class="chevron">▼</div>
+          </div>
+        </div>
+        <div class="section-body">
+          <div class="load-bar">
+            <div class="load-gauge"><span class="load-val">0.41</span></div>
+            <div class="load-details">
+              <div class="load-row">
+                <span class="load-label">1 min</span>
+                <div class="load-track"><div class="load-fill" style="width:20.5%"></div></div>
+                <span class="load-num">0.41</span>
+              </div>
+              <div class="load-row">
+                <span class="load-label">5 min</span>
+                <div class="load-track"><div class="load-fill" style="width:19%"></div></div>
+                <span class="load-num">0.38</span>
+              </div>
+              <div class="load-row">
+                <span class="load-label">15 min</span>
+                <div class="load-track"><div class="load-fill" style="width:13%"></div></div>
+                <span class="load-num">0.26</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Brokers -->
+      <div class="section-panel" id="panel-brokers">
+        <div class="section-header" onclick="togglePanel('panel-brokers')">
+          <div class="section-header-left">
+            <div class="section-icon blue">B</div>
+            <div>
+              <div class="section-title">EntireX Brokers</div>
+              <div class="section-count">5 broker processes</div>
+            </div>
+          </div>
+          <div style="display:flex;align-items:center;gap:12px">
+            <div class="section-status-badge up">● RUNNING</div>
+            <div class="chevron">▼</div>
+          </div>
+        </div>
+        <div class="section-body">
+          <div class="process-table">
+            <div class="proc-row">
+              <span class="proc-index">#1</span>
+              <span class="proc-cmd">/etbnuc -a /opt/<span class="proc-highlight">webmethods</span>/EntireX/config/etb/<span class="proc-highlight">ETB001</span>/ETB001.atr</span>
+              <span class="proc-status">● ACTIVE</span>
+            </div>
+            <div class="proc-row">
+              <span class="proc-index">#2</span>
+              <span class="proc-cmd">/etbnuc -a /opt/<span class="proc-highlight">softwareag</span>/EntireX/config/etb/<span class="proc-highlight">ETB001</span>/ETB001.atr</span>
+              <span class="proc-status">● ACTIVE</span>
+            </div>
+            <div class="proc-row">
+              <span class="proc-index">#3</span>
+              <span class="proc-cmd">/etbnuc -a /opt/<span class="proc-highlight">softwareag</span>/EntireX/config/etb/<span class="proc-highlight">ETB109</span>/etbfile</span>
+              <span class="proc-status">● ACTIVE</span>
+            </div>
+            <div class="proc-row">
+              <span class="proc-index">#4</span>
+              <span class="proc-cmd">/opt/<span class="proc-highlight">softwareag</span>/EntireX/config/etb/<span class="proc-highlight">ETB227</span>/CMDLOGR1.LOG</span>
+              <span class="proc-status">● ACTIVE</span>
+            </div>
+            <div class="proc-row">
+              <span class="proc-index">#5</span>
+              <span class="proc-cmd">/opt/<span class="proc-highlight">softwareag</span>/EntireX/config/etb/<span class="proc-highlight">ETB225</span>/CMDLOGR1.LOG</span>
+              <span class="proc-status">● ACTIVE</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- NATBP Shared Memory -->
+      <div class="section-panel" id="panel-natbp">
+        <div class="section-header" onclick="togglePanel('panel-natbp')">
+          <div class="section-header-left">
+            <div class="section-icon green">N</div>
+            <div>
+              <div class="section-title">NATBP Shared Memory</div>
+              <div class="section-count">9 shared memory segments</div>
+            </div>
+          </div>
+          <div style="display:flex;align-items:center;gap:12px">
+            <div class="section-status-badge up">● ALLOCATED</div>
+            <div class="chevron">▼</div>
+          </div>
+        </div>
+        <div class="section-body">
+          <div class="shm-table">
+            <div class="shm-header">
+              <span>KEY</span><span>ID</span><span>OWNER</span><span>PERMS</span><span>BYTES</span><span>ATT</span>
+            </div>
+            <div class="shm-row"><span class="shm-key">0x19341111</span><span>4</span><span>sag</span><span>660</span><span>41,943,040</span><span>5</span></div>
+            <div class="shm-row"><span class="shm-key">0x19211111</span><span>5</span><span>sag</span><span>660</span><span>20,971,520</span><span>0</span></div>
+            <div class="shm-row"><span class="shm-key">0x19141111</span><span>6</span><span>sag</span><span>660</span><span>41,943,040</span><span>4</span></div>
+            <div class="shm-row"><span class="shm-key">0x19342221</span><span>7</span><span>sag</span><span>660</span><span>41,943,040</span><span>1</span></div>
+            <div class="shm-row"><span class="shm-key">0x19349999</span><span>8</span><span>sag</span><span>660</span><span>41,943,040</span><span>10</span></div>
+            <div class="shm-row"><span class="shm-key">0x19342222</span><span>9</span><span>sag</span><span>660</span><span>41,943,040</span><span>0</span></div>
+            <div class="shm-row"><span class="shm-key">0x19342223</span><span>10</span><span>sag</span><span>660</span><span>41,943,040</span><span>11</span></div>
+            <div class="shm-row"><span class="shm-key">0x19342224</span><span>11</span><span>sag</span><span>660</span><span>41,943,040</span><span>0</span></div>
+            <div class="shm-row"><span class="shm-key">0x19342225</span><span>12</span><span>sag</span><span>660</span><span>41,943,040</span><span>0</span></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- NDV Servers -->
+      <div class="section-panel" id="panel-ndvs">
+        <div class="section-header" onclick="togglePanel('panel-ndvs')">
+          <div class="section-header-left">
+            <div class="section-icon blue">D</div>
+            <div>
+              <div class="section-title">NDV Servers</div>
+              <div class="section-count">6 Natural Development Servers</div>
+            </div>
+          </div>
+          <div style="display:flex;align-items:center;gap:12px">
+            <div class="section-status-badge up">● RUNNING</div>
+            <div class="chevron">▼</div>
+          </div>
+        </div>
+        <div class="section-body">
+          <div class="process-table">
+            <div class="proc-row">
+              <span class="proc-index">#1</span>
+              <span class="proc-cmd">natdvsrv -port=<span class="proc-highlight">2700</span> parm=<span class="proc-highlight">NDVPARM</span></span>
+              <span class="proc-status">● ACTIVE</span>
+            </div>
+            <div class="proc-row">
+              <span class="proc-index">#2</span>
+              <span class="proc-cmd">natdvsrv -s=.../natural -port=<span class="proc-highlight">2703</span> parm=<span class="proc-highlight">JAWSNDV</span></span>
+              <span class="proc-status">● ACTIVE</span>
+            </div>
+            <div class="proc-row">
+              <span class="proc-index">#3</span>
+              <span class="proc-cmd">natdvsrv -s=.../natural -port=<span class="proc-highlight">2704</span> parm=<span class="proc-highlight">MACNDV</span></span>
+              <span class="proc-status">● ACTIVE</span>
+            </div>
+            <div class="proc-row">
+              <span class="proc-index">#4</span>
+              <span class="proc-cmd">natdvsrv -s=.../natural -port=<span class="proc-highlight">2702</span> parm=<span class="proc-highlight">MAVNDV</span></span>
+              <span class="proc-status">● ACTIVE</span>
+            </div>
+            <div class="proc-row">
+              <span class="proc-index">#5</span>
+              <span class="proc-cmd">natdvsrv -s=.../natural -port=<span class="proc-highlight">2701</span> parm=<span class="proc-highlight">METSSNDV</span></span>
+              <span class="proc-status">● ACTIVE</span>
+            </div>
+            <div class="proc-row">
+              <span class="proc-index">#6</span>
+              <span class="proc-cmd">natdvsrv -s=.../natural -port=<span class="proc-highlight">2705</span> parm=<span class="proc-highlight">EFITSNDV</span></span>
+              <span class="proc-status">● ACTIVE</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Databases -->
+      <div class="section-panel" id="panel-dbs">
+        <div class="section-header" onclick="togglePanel('panel-dbs')">
+          <div class="section-header-left">
+            <div class="section-icon green">A</div>
+            <div>
+              <div class="section-title">Adabas Databases</div>
+              <div class="section-count">9 database nuclei</div>
+            </div>
+          </div>
+          <div style="display:flex;align-items:center;gap:12px">
+            <div class="section-status-badge up">● ONLINE</div>
+            <div class="chevron">▼</div>
+          </div>
+        </div>
+        <div class="section-body">
+          <div class="process-table">
+            <div class="proc-row">
+              <span class="proc-index">#1</span>
+              <span class="proc-cmd">adanuc.bin ADASTARTPORTNUMBER=43575, <span class="proc-highlight">DBID=200</span></span>
+              <span class="proc-status">● ONLINE</span>
+            </div>
+            <div class="proc-row">
+              <span class="proc-index">#2</span>
+              <span class="proc-cmd">adanuc.bin ADASTARTPORTNUMBER=33343, <span class="proc-highlight">DBID=101</span></span>
+              <span class="proc-status">● ONLINE</span>
+            </div>
+            <div class="proc-row">
+              <span class="proc-index">#3</span>
+              <span class="proc-cmd">adanuc.bin ADASTARTPORTNUMBER=44621, <span class="proc-highlight">DBID=41</span></span>
+              <span class="proc-status">● ONLINE</span>
+            </div>
+            <div class="proc-row">
+              <span class="proc-index">#4</span>
+              <span class="proc-cmd">adanuc.bin ADASTARTPORTNUMBER=41331, <span class="proc-highlight">DBID=45</span></span>
+              <span class="proc-status">● ONLINE</span>
+            </div>
+            <div class="proc-row">
+              <span class="proc-index">#5</span>
+              <span class="proc-cmd">adanuc.bin ADASTARTPORTNUMBER=39563, <span class="proc-highlight">DBID=75</span></span>
+              <span class="proc-status">● ONLINE</span>
+            </div>
+            <div class="proc-row">
+              <span class="proc-index">#6</span>
+              <span class="proc-cmd">adanuc.bin ADASTARTPORTNUMBER=38257, <span class="proc-highlight">DBID=65</span></span>
+              <span class="proc-status">● ONLINE</span>
+            </div>
+            <div class="proc-row">
+              <span class="proc-index">#7</span>
+              <span class="proc-cmd">adanuc.bin ADASTARTPORTNUMBER=41433, <span class="proc-highlight">DBID=66</span></span>
+              <span class="proc-status">● ONLINE</span>
+            </div>
+            <div class="proc-row">
+              <span class="proc-index">#8</span>
+              <span class="proc-cmd">adanuc.bin ADASTARTPORTNUMBER=42321, <span class="proc-highlight">DBID=38</span></span>
+              <span class="proc-status">● ONLINE</span>
+            </div>
+            <div class="proc-row">
+              <span class="proc-index">#9</span>
+              <span class="proc-cmd">adanuc.bin ADASTARTPORTNUMBER=41139, <span class="proc-highlight">DBID=69</span></span>
+              <span class="proc-status">● ONLINE</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- CICS -->
+      <div class="section-panel" id="panel-cics">
+        <div class="section-header" onclick="togglePanel('panel-cics')">
+          <div class="section-header-left">
+            <div class="section-icon blue">C</div>
+            <div>
+              <div class="section-title">CICS Services (Micro Focus)</div>
+              <div class="section-count">7 processes — MNCICSA, MNCLMS regions</div>
+            </div>
+          </div>
+          <div style="display:flex;align-items:center;gap:12px">
+            <div class="section-status-badge up">● RUNNING</div>
+            <div class="chevron">▼</div>
+          </div>
+        </div>
+        <div class="section-body">
+          <div class="process-table">
+            <div class="proc-row">
+              <span class="proc-index">#1</span>
+              <span class="proc-cmd"><span class="proc-highlight">lserv</span> — /var/microfocuslicensing/bin/lserv</span>
+              <span class="proc-status">● ACTIVE</span>
+            </div>
+            <div class="proc-row">
+              <span class="proc-index">#2</span>
+              <span class="proc-cmd"><span class="proc-highlight">escwa64</span> — Enterprise Server Common Web Admin --write=true</span>
+              <span class="proc-status">● ACTIVE</span>
+            </div>
+            <div class="proc-row">
+              <span class="proc-index">#3</span>
+              <span class="proc-cmd"><span class="proc-highlight">mfcesd</span> — /var/microfocuslicensing/bin/mfcesd</span>
+              <span class="proc-status">● ACTIVE</span>
+            </div>
+            <div class="proc-row">
+              <span class="proc-index">#4</span>
+              <span class="proc-cmd"><span class="proc-highlight">mfds64</span> — Micro Focus Directory Server</span>
+              <span class="proc-status">● ACTIVE</span>
+            </div>
+            <div class="proc-row">
+              <span class="proc-index">#5</span>
+              <span class="proc-cmd"><span class="proc-highlight">cascd64</span> /r<span class="proc-highlight">MNCICSA</span> /A — CICS Region A</span>
+              <span class="proc-status">● ACTIVE</span>
+            </div>
+            <div class="proc-row">
+              <span class="proc-index">#6</span>
+              <span class="proc-cmd"><span class="proc-highlight">cascd64</span> /r<span class="proc-highlight">MNCLMS</span> /A — CICS LMS Region</span>
+              <span class="proc-status">● ACTIVE</span>
+            </div>
+            <div class="proc-row">
+              <span class="proc-index">#7</span>
+              <span class="proc-cmd"><span class="proc-highlight">mfds64</span> — Micro Focus Directory Server (2nd instance)</span>
+              <span class="proc-status">● ACTIVE</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- CRONUS -->
+      <div class="section-panel" id="panel-cronus">
+        <div class="section-header" onclick="togglePanel('panel-cronus')">
+          <div class="section-header-left">
+            <div class="section-icon amber">J</div>
+            <div>
+              <div class="section-title">CRONUS Scheduler</div>
+              <div class="section-count">2 scheduler processes</div>
+            </div>
+          </div>
+          <div style="display:flex;align-items:center;gap:12px">
+            <div class="section-status-badge up">● RUNNING</div>
+            <div class="chevron">▼</div>
+          </div>
+        </div>
+        <div class="section-body">
+          <div class="process-table">
+            <div class="proc-row">
+              <span class="proc-index">#1</span>
+              <span class="proc-cmd">/bin/ksh /opt/softwareag/cronus/scripts/<span class="proc-highlight">Jobsched.natd.bsh</span></span>
+              <span class="proc-status">● ACTIVE</span>
+            </div>
+            <div class="proc-row">
+              <span class="proc-index">#2</span>
+              <span class="proc-cmd">/bin/ksh /opt/softwareag/cronus/scripts/<span class="proc-highlight">Autosched.natd.bsh</span></span>
+              <span class="proc-status">● ACTIVE</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- S4 -->
+      <div class="section-panel" id="panel-s4">
+        <div class="section-header" onclick="togglePanel('panel-s4')">
+          <div class="section-header-left">
+            <div class="section-icon green">S4</div>
+            <div>
+              <div class="section-title">Secure4 (S4)</div>
+              <div class="section-count">3 access/LDAP processes</div>
+            </div>
+          </div>
+          <div style="display:flex;align-items:center;gap:12px">
+            <div class="section-status-badge up">● RUNNING</div>
+            <div class="chevron">▼</div>
+          </div>
+        </div>
+        <div class="section-body">
+          <div class="process-table">
+            <div class="proc-row">
+              <span class="proc-index">#1</span>
+              <span class="proc-cmd">/bin/secure4/s4access.dir/<span class="proc-highlight">s4accsrv</span> -r</span>
+              <span class="proc-status">● ACTIVE</span>
+            </div>
+            <div class="proc-row">
+              <span class="proc-index">#2</span>
+              <span class="proc-cmd">/bin/secure4/s4access.dir/<span class="proc-highlight">s4accldap</span> -r (instance 1)</span>
+              <span class="proc-status">● ACTIVE</span>
+            </div>
+            <div class="proc-row">
+              <span class="proc-index">#3</span>
+              <span class="proc-cmd">/bin/secure4/s4access.dir/<span class="proc-highlight">s4accldap</span> -r (instance 2)</span>
+              <span class="proc-status">● ACTIVE</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- tcVision -->
+      <div class="section-panel" id="panel-tcvision">
+        <div class="section-header" onclick="togglePanel('panel-tcvision')">
+          <div class="section-header-left">
+            <div class="section-icon blue">R</div>
+            <div>
+              <div class="section-title">tcVision / RDRS Replication</div>
+              <div class="section-count">1 replication process</div>
+            </div>
+          </div>
+          <div style="display:flex;align-items:center;gap:12px">
+            <div class="section-status-badge up">● RUNNING</div>
+            <div class="chevron">▼</div>
+          </div>
+        </div>
+        <div class="section-body">
+          <div class="process-table">
+            <div class="proc-row">
+              <span class="proc-index">#1</span>
+              <span class="proc-cmd">/opt/softwareag/<span class="proc-highlight">tcVision61_MDCPS_Prod</span>/bin/tcscript</span>
+              <span class="proc-status">● ACTIVE</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div><!-- end view-all -->
+  </main>
+</div>
+
+<script>
+  function togglePanel(id) {
+    document.getElementById(id).classList.toggle('collapsed');
+  }
+
+  function showSection(section, navEl) {
+    // Update nav
+    document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
+    if (navEl) navEl.classList.add('active');
+
+    const allView = document.getElementById('view-all');
+    if (section === 'all') {
+      allView.style.display = 'block';
+      document.querySelectorAll('.section-panel').forEach(p => p.style.display = '');
+      return;
+    }
+
+    allView.style.display = 'block';
+    const panels = document.querySelectorAll('.section-panel');
+    panels.forEach(p => p.style.display = 'none');
+
+    const target = document.getElementById('panel-' + section);
+    if (target) {
+      target.style.display = '';
+      target.classList.remove('collapsed');
+    }
+
+    // Hide overview bar when viewing single section
+    const overviewBar = document.querySelector('.overview-bar');
+    if (section !== 'all' && overviewBar) {
+      overviewBar.style.display = section === 'all' ? '' : 'none';
+    }
+  }
+
+  function refreshAll() {
+    const btn = document.querySelector('.refresh-btn');
+    btn.textContent = '⟳ REFRESHING...';
+    btn.style.pointerEvents = 'none';
+
+    // Flash all status badges
+    document.querySelectorAll('.section-status-badge').forEach(b => {
+      b.style.transition = 'opacity 0.2s';
+      b.style.opacity = '0.3';
+      setTimeout(() => { b.style.opacity = '1'; }, 600);
+    });
+
+    setTimeout(() => {
+      btn.textContent = '⟳ REFRESH';
+      btn.style.pointerEvents = '';
+    }, 1200);
+  }
+
+  // Keyboard shortcut: R to refresh
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'r' && !e.ctrlKey && !e.metaKey && document.activeElement.tagName !== 'INPUT') {
+      refreshAll();
+    }
+  });
+</script>
+</body>
+</html>
